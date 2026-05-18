@@ -108,7 +108,7 @@ sudo dnf update -y
 # ==================== Disable Swap ====================
 # Kubernetes does NOT work reliably with swap enabled
 sudo swapoff -a
-sudo sed -i '/ swap / s/^$$ .* \$\$\$/#\1/g' /etc/fstab
+sudo sed -i '/swap/ s/^\(.*\)$/#\1/g' /etc/fstab
 ```
 ```
 # ==================== Load Kernel Modules ====================
