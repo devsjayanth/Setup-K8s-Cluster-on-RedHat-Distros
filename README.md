@@ -247,7 +247,7 @@ sudo kubeadm join <master-ip>:6443 --token <token> \
 
 ```bash
 kubectl apply -f https://docs.projectcalico.org/manifests/calico.yaml
-
+```
 ---
 
 ## 8. Install MetalLB (On Master)
