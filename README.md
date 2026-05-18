@@ -245,7 +245,11 @@ sudo kubeadm join <master-ip>:6443 --token <token> \
 
 ## 7. Install Calico CNI (On Master)
 
-Operator Method:
+Legacy Install Method:
+```bash
+kubectl apply -f https://docs.projectcalico.org/manifests/calico.yaml
+```
+Operator Install Method:
 ```bash
 # Prevent NetworkManager conflicts (RHEL-specific)
 sudo mkdir -p /etc/NetworkManager/conf.d/
@@ -259,10 +263,7 @@ sudo systemctl reload NetworkManager
 kubectl create -f https://raw.githubusercontent.com/projectcalico/calico/v3.32.0/manifests/tigera-operator.yaml
 kubectl create -f https://raw.githubusercontent.com/projectcalico/calico/v3.32.0/manifests/custom-resources.yaml
 ```
-Legacy Method:
-```bash
-kubectl apply -f https://docs.projectcalico.org/manifests/calico.yaml
-```
+
 ---
 
 ## 8. Install MetalLB (On Master)
