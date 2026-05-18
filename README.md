@@ -103,6 +103,15 @@ Cluster initialization may fail or pods may not communicate properly.
 ```bash
 # Update all system packages to latest version
 sudo dnf update -y
+
+# 1. Install kernel modules package
+sudo dnf install -y kernel-modules
+
+# 2. Update kernel and modules
+sudo dnf update -y kernel kernel-core kernel-modules
+
+# 3. Reboot the node
+sudo reboot
 ```
 ```
 # ==================== Disable Swap ====================
