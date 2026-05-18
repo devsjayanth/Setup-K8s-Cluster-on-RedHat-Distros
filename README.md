@@ -200,9 +200,9 @@ sudo dnf install -y container-selinux
 
 
 #### Open ports required (All Nodes)
-> 10250 kubelet API: pod management, exec, logs, health checks.
-> 30000-32767 NodePort services: external access to services.
-> NAT masquerading: enables pod egress to internet.
+> **Port:10250** kubelet API: pod management, exec, logs, health checks.
+> **Port:30000-32767** NodePort services: external access to services.
+> **NAT masquerading:** enables pod egress to internet.
 ```bash
 
 sudo firewall-cmd --permanent --add-port=10250/tcp       
@@ -211,10 +211,10 @@ sudo firewall-cmd --permanent --add-masquerade
 ```
 
 #### Open control-plane-specific ports (K8s-Master)
-> 6443 kube-apiserver: main Kubernetes API endpoint.
-> 2379-2380 etcd: cluster state storage (client and peer ports).
-> 10259 kube-scheduler: metrics and health endpoint.
-> 10257 kube-controller-manager: metrics and health endpoint.
+> **Port:6443** kube-apiserver: main Kubernetes API endpoint.
+> **Port:2379-2380** etcd: cluster state storage (client and peer ports).
+> **Port:10259** kube-scheduler: metrics and health endpoint.
+> **Port:10257** kube-controller-manager: metrics and health endpoint.
 
 ```bash
 sudo firewall-cmd --permanent --add-port=6443/tcp        
