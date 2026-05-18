@@ -25,11 +25,11 @@
 
 | Role | Hostname | IP Address | Requirements |
 |------|----------|------------|-------------|
-| 🎛️ Control Plane | k8s-master | "<master-ip>" | 2+ CPU, 2GB+ RAM |
-| 👷 Worker Node | k8s-node1 | "<node1-ip>" | 2+ CPU, 2GB+ RAM |
-| 👷 Worker Node | k8s-node2 | "<node2-ip>" | 2+ CPU, 2GB+ RAM |
+| 🎛️ Control Plane | k8s-master | master-ip | 2+ CPU, 2GB+ RAM |
+| 👷 Worker Node | k8s-node1 | node1-ip | 2+ CPU, 2GB+ RAM |
+| 👷 Worker Node | k8s-node2 | node2-ip | 2+ CPU, 2GB+ RAM |
 
-> 💡 Replace "<master-ip>", "<node1-ip>", "<node2-ip>" with your actual IPs
+> 💡 Replace master-ip, node1-ip, node2-ip with your actual IPs
 
 ---
 
