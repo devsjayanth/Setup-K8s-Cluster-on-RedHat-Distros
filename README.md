@@ -26,9 +26,14 @@ A complete step-by-step guide to deploy a 3-node Kubernetes cluster.
 ### 1.1 Set Hostnames
 ```bash
 sudo hostnamectl set-hostname k8s-master
+```
+```
 sudo hostnamectl set-hostname k8s-node1
+```
+```
 sudo hostnamectl set-hostname k8s-node2
-
+```
+```
 exec bash
 ```
 
@@ -42,7 +47,8 @@ sudo nmcli connection modify <interface-name> \
   ipv4.gateway <your-gateway-ip> \
   ipv4.dns "8.8.8.8,1.1.1.1" \
   connection.autoconnect yes
-
+```
+```
 sudo nmcli connection down <interface-name> && sudo nmcli connection up <interface-name>
 ```
 
@@ -81,12 +87,14 @@ Cluster initialization may fail or pods may not communicate properly.
 ```bash
 # Update all system packages to latest version
 sudo dnf update -y
-
+```
+```
 # ==================== Disable Swap ====================
 # Kubernetes does NOT work reliably with swap enabled
 sudo swapoff -a
 sudo sed -i '/ swap / s/^$$ .* \$\$\$/#\1/g' /etc/fstab
-
+```
+```
 # ==================== Load Kernel Modules ====================
 # overlay  = Required for container storage
 # br_netfilter = Required for Kubernetes networking (bridge + netfilter)
@@ -97,7 +105,8 @@ EOF
 
 sudo modprobe overlay
 sudo modprobe br_netfilter
-
+```
+```
 # ==================== Sysctl Settings ====================
 # These parameters are mandatory for Kubernetes networking
 # Enable iptables for bridged traffic(IPv4/IPv6)
@@ -109,7 +118,8 @@ net.ipv4.ip_forward                 = 1
 EOF
 
 sudo sysctl --system
-
+```
+```
 # ==================== SELinux Configuration ====================
 # Set SELinux to permissive mode (Kubernetes works best in this mode on RHEL)
 sudo setenforce 0
@@ -156,10 +166,12 @@ Runs your application containers (pods).
 ```bash
 sudo dnf config-manager --add-repo https://download.docker.com/linux/rhel/docker-ce.repo
 sudo dnf install -y containerd.io
-
+```
+```
 sudo mkdir -p /etc/containerd
 containerd config default | sudo tee /etc/containerd/config.toml > /dev/null
-
+```
+```
 sudo sed -i 's/SystemdCgroup = false/SystemdCgroup = true/' /etc/containerd/config.toml
 
 sudo systemctl enable --now containerd
@@ -192,7 +204,8 @@ enabled=1
 gpgcheck=1
 gpgkey=https://pkgs.k8s.io/core:/stable:/v1.36/rpm/repodata/repomd.xml.key
 EOF
-
+```
+```
 sudo dnf install -y kubelet kubeadm kubectl --disableexcludes=kubernetes
 sudo systemctl enable --now kubelet
 ```
