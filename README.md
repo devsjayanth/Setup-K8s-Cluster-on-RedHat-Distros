@@ -46,7 +46,7 @@ sudo dnf update -y
 sudo dnf install -y kernel-modules dnf-plugins-core chrony
 sudo systemctl enable --now chronyd
 sudo systemctl start chronyd
-timedatectl set-timezone UTC
+sudo timedatectl set-timezone UTC
 ```
 
 ---
