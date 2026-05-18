@@ -104,9 +104,11 @@ Cluster initialization may fail or pods may not communicate properly.
 # Update system + install required kernel modules
 sudo dnf update -y
 sudo dnf install -y kernel-modules dnf-plugins-core chrony
+
 # ==================== Enable Time Sync ====================
 sudo systemctl enable --now chronyd
 timedatectl set-timezone UTC
+
 # ==================== Disable Swap ====================
 sudo swapoff -a
 sudo sed -i '/ swap / s/^/#/' /etc/fstab
