@@ -107,6 +107,9 @@ sudo reboot
 
 ### 2.1 Load Kernel Modules
 ```bash
+sudo modprobe bridge
+sudo dnf install -y kernel-modules-extra
+
 sudo tee /etc/modules-load.d/k8s.conf > /dev/null <<EOF
 overlay
 br_netfilter
