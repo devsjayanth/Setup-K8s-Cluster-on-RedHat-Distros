@@ -51,7 +51,7 @@ sudo nmcli connection modify <interface-name> \
 ```
 sudo nmcli connection down <interface-name> && sudo nmcli connection up <interface-name>
 ```
-Example
+Example:
 ```
 sudo nmcli connection modify ens192 ipv4.addresses 10.0.0.50/24
 sudo nmcli connection modify ens192 connection.autoconnect yes
@@ -66,6 +66,15 @@ sudo tee -a /etc/hosts <<EOF
 <master-ip>   k8s-master
 <node1-ip>    k8s-node1
 <node2-ip>    k8s-node2
+EOF
+```
+Example:
+```
+sudo tee -a /etc/hosts <<EOF
+# Kubernetes Cluster Nodes
+10.0.0.150   k8s-master
+10.0.0.151    k8s-node1
+10.0.0.152    k8s-node2
 EOF
 ```
 
