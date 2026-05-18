@@ -198,17 +198,29 @@ sudo dnf install -y container-selinux
 > **Why install:** Ensures control plane and worker nodes can communicate securely.  
 > **If skipped:** kubeadm init/join will timeout; nodes appear "NotReady"; services become unreachable.
 
-```bash
-# Open ports required on all nodes (kubelet API and NodePort services)
-sudo firewall-cmd --permanent --add-port=10250/tcp
-sudo firewall-cmd --permanent --add-port=30000-32767/tcp
-sudo firewall-cmd --permanent --add-masquerade
 
-# Open control-plane-specific ports on k8s-master only
-sudo firewall-cmd --permanent --add-port=6443/tcp
-sudo firewall-cmd --permanent --add-port=2379-2380/tcp
-sudo firewall-cmd --permanent --add-port=10259/tcp
-sudo firewall-cmd --permanent --add-port=10257/tcp
+#### Open ports required (All Nodes)
+10250-> kubelet API: pod management, exec, logs, health checks
+30000-32767-> NodePort services: external access to services
+NAT masquerading: enables pod egress to internet
+```bash
+
+sudo firewall-cmd --permanent --add-port=10250/tcp       
+sudo firewall-cmd --permanent --add-port=30000-32767/tcp
+sudo firewall-cmd --permanent --add-masquerade           
+```
+
+#### Open control-plane-specific ports (K8s-Master)
+6443-> kube-apiserver: main Kubernetes API endpoint
+2379-2380-> etcd: cluster state storage (client and peer ports)
+10259-> kube-scheduler: metrics and health endpoint
+10257-> kube-controller-manager: metrics and health endpoint
+
+```bash
+sudo firewall-cmd --permanent --add-port=6443/tcp        
+sudo firewall-cmd --permanent --add-port=2379-2380/tcp   
+sudo firewall-cmd --permanent --add-port=10259/tcp       
+sudo firewall-cmd --permanent --add-port=10257/tcp      
 
 # Reload firewall to apply all new rules
 sudo firewall-cmd --reload
