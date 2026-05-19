@@ -69,13 +69,16 @@ sudo timedatectl set-timezone UTC
 ```bash
 # Set hostname on control plane node
 sudo hostnamectl set-hostname k8s-master
-
+```
+```
 # Set hostname on first worker node
 sudo hostnamectl set-hostname k8s-node1
-
+```
+```
 # Set hostname on second worker node
 sudo hostnamectl set-hostname k8s-node2
-
+```
+```
 # Reload shell to apply hostname changes immediately
 exec bash
 ```
@@ -209,6 +212,10 @@ sudo firewall-cmd --permanent --add-port=10250/tcp
 sudo firewall-cmd --permanent --add-port=30000-32767/tcp
 sudo firewall-cmd --permanent --add-masquerade           
 ```
+```
+# Reload firewall to apply all new rules
+sudo firewall-cmd --reload
+```
 
 #### Open control-plane-specific ports (K8s-Master)
 > **Port:6443** kube-apiserver: main Kubernetes API endpoint.
@@ -221,7 +228,8 @@ sudo firewall-cmd --permanent --add-port=6443/tcp
 sudo firewall-cmd --permanent --add-port=2379-2380/tcp   
 sudo firewall-cmd --permanent --add-port=10259/tcp       
 sudo firewall-cmd --permanent --add-port=10257/tcp      
-
+```
+```
 # Reload firewall to apply all new rules
 sudo firewall-cmd --reload
 ```
