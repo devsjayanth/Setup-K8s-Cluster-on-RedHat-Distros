@@ -469,7 +469,17 @@ kubectl wait --namespace=metallb-system \
   --selector=component=controller \
   --timeout=90s
 ```
-
+### Verify if the metallb-system is running
+```
+kubectl get pod -n metallb-system
+```
+```Output:
+NAME                         READY   STATUS    RESTARTS   AGE
+controller-f59dc4bc7-h895q   1/1     Running   0          109s
+speaker-fhd5j                1/1     Running   0          109s
+speaker-gxlv4                1/1     Running   0          109s
+speaker-qtj2d                1/1     Running   0          109s
+```
 ### Configure IPAddressPool
 ```bash
 # Create MetalLB configuration with IP pool and L2 advertisement
