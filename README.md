@@ -365,6 +365,26 @@ sudo firewall-cmd --reload
 # Apply Calico manifest for basic installation
 kubectl apply -f https://docs.projectcalico.org/manifests/calico.yaml
 ```
+### Verify Calico running:
+```
+kubectl get pod -n kube-system
+```
+```Output:
+NAME                                      READY   STATUS    RESTARTS        AGE
+calico-kube-controllers-c57dfffd6-t4bm4   1/1     Running   0               8m53s
+calico-node-4d48b                         1/1     Running   0               8m53s
+calico-node-pqqvh                         1/1     Running   0               8m53s
+calico-node-vn5kf                         1/1     Running   0               8m53s
+coredns-589f44dc88-82tp2                  1/1     Running   0               148m
+coredns-589f44dc88-p88vn                  1/1     Running   0               148m
+etcd-k8s-master                           1/1     Running   2 (10m ago)     148m
+kube-apiserver-k8s-master                 1/1     Running   2 (10m ago)     148m
+kube-controller-manager-k8s-master        1/1     Running   3 (5m48s ago)   148m
+kube-proxy-5wf2x                          1/1     Running   2 (10m ago)     148m
+kube-proxy-c5mp8                          1/1     Running   2 (10m ago)     146m
+kube-proxy-r86rz                          1/1     Running   2 (10m ago)     148m
+kube-scheduler-k8s-master                 1/1     Running   3 (5m44s ago)   148m
+```
 
 Or
 
