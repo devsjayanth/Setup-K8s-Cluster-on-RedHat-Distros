@@ -37,8 +37,8 @@ Before typing commands, it helps to understand how traffic flows from the outsid
 ## 🛠️ Step 1 — OS Preparation `[ALL Nodes]`
 *Run these steps on **all 3 nodes** (Master and Workers).*
 
-### 1.1 🏷️ Local DNS Resolution
-> 🧠 **What this does:** K8s nodes must be able to find each other by name. Since we don't have a local DNS server configured for these static IPs, we hardcode them into the local `/etc/hosts` file.
+### 1.1 🏷️ DNS Resolution
+> 🧠 **What this does:** K8s nodes must be able to find each other by name. If you have seperate DNS server configure it or hardcode them into the local `/etc/hosts` file.
 Set a unique hostname for the machine you are currently on
 ```bash
 sudo hostnamectl set-hostname k8s-master
