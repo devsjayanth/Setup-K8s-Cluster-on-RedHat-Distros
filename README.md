@@ -1,4 +1,4 @@
-# 🚢 Kubernetes Cluster Setup on [ RHEL10/Redhat10 ]
+# 🚢Kubernetes Cluster Setup on [ RHEL10/Redhat10 ]☸️
 ### 🐧 RHEL 10 · Rocky Linux 10 · AlmaLinux 10
 ### 🕸️ Calico (NFT) · ⚖️ MetalLB · 🚦 F5 NGINX Ingress Controller
 
@@ -13,7 +13,7 @@ Before typing commands, it helps to understand how traffic flows from the outsid
 ### 🔄 Traffic Flow Architecture
 
 ```text
-│🌐User│───▶│⚖️MetalLB (LoadBalancer)│───▶│🚦NGINX (Ingress)│───▶│🕸️Calico (Network)│───▶│K8s-Pods│
+🌐User ───▶⚖️MetalLB (LoadBalancer) ───▶🚦NGINX (Ingress) ───▶🕸️Calico (Network) ───▶☸️K8s-Pods
 ```
 
 ### 📋 Component Glossary
