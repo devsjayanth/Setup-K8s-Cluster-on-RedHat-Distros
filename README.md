@@ -403,7 +403,8 @@ csi-node-driver-89zlf                      2/2     Running   0          13m
 curl -sLO https://github.com/projectcalico/calico/releases/download/v3.32.0/calicoctl-linux-amd64
 sudo install -o root -g root -m 0755 calicoctl-linux-amd64 /usr/local/bin/calicoctl
 rm -f calicoctl-linux-amd64
-
+```
+```
 sudo mkdir -p /etc/calico
 sudo tee /etc/calico/calicoctl.cfg <<EOF
 apiVersion: projectcalico.org/v3
@@ -413,9 +414,10 @@ spec:
   datastoreType: kubernetes
   kubeconfig: /home/$(whoami)/.kube/config
 EOF
-
-# Disable BGP Full Mesh (we are using VXLAN overlay, not physical BGP routers)
-# Configure Felix (the node agent) for optimal logging and health checks
+```
+Disable BGP Full Mesh (we are using VXLAN overlay, not physical BGP routers)
+Configure Felix (the node agent) for optimal logging and health checks
+```
 sudo /usr/local/bin/calicoctl apply -f - <<'EOF'
 apiVersion: projectcalico.org/v3
 kind: BGPConfiguration
