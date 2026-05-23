@@ -315,7 +315,10 @@ sudo chown $(id -u):$(id -g) $HOME/.kube/config
 ### 2.3 🤝 Join Worker Nodes `[Worker Node]`
 *Run the saved `kubeadm join` command on `k8s-node1` and `k8s-node2`.*
 *(💡 Note: If a worker gets an "empty config.yaml" crash loop, run `sudo kubeadm reset -f`, `sudo rm -rf /var/lib/kubelet`, and try the join command again).*
-
+```bash
+sudo reboot
+```
+*(⏳ Log back into all 3 nodes after they reboot)*
 ---
 
 ## 🕸️ Step 3 — Install Calico CNI `[Master Node(Control Plane)]`
@@ -371,6 +374,27 @@ metadata:
 spec: {}
 EOF
 ```
+Wait for all Calico System pods in running state:
+```
+kubectl get pod -n calico-system
+```
+Output:
+```
+NAME                                       READY   STATUS    RESTARTS   AGE
+calico-apiserver-5647d8796d-fblj8          1/1     Running   0          13m
+calico-apiserver-5647d8796d-scltf          1/1     Running   0          13m
+calico-kube-controllers-86657c7f66-hp5rn   1/1     Running   0          13m
+calico-node-8rvvg                          1/1     Running   0          13m
+calico-node-bb45v                          1/1     Running   0          13m
+calico-node-kzqdq                          1/1     Running   0          13m
+calico-typha-64645b996b-szzwh              1/1     Running   0          13m
+calico-typha-64645b996b-v54s9              1/1     Running   0          13m
+csi-node-driver-47m86                      2/2     Running   0          13m
+csi-node-driver-495v5                      2/2     Running   0          13m
+csi-node-driver-89zlf                      2/2     Running   0          13m
+
+```
+
 
 ### 3.2 🛠️ Install and Configure `calicoctl`
 > 🧠 **What this does:** Installs the Calico CLI. Notice the `<<EOF` (without quotes) on the config file generation—this allows `$(whoami)` to dynamically inject your current user's home directory, ensuring `sudo calicoctl` works without permission errors.
