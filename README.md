@@ -13,7 +13,7 @@ Before typing commands, it helps to understand how traffic flows from the outsid
 ### 🔄 Traffic Flow Architecture
 
 ```text
-│🌐 Clients│───▶│⚖️ MetalLB│───▶│🚦NGINX│───▶│🕸️ Calico CNI│───▶│K8s App Pods│
+│🌐 Clients/Internet│───▶│⚖️ MetalLB (LoadBalancer)│───▶│🚦NGINX (Ingress Controller)│───▶│🕸️ Calico (Container Network)│───▶│K8s Application Pods│
 ```
 
 ### 📋 Component Glossary
