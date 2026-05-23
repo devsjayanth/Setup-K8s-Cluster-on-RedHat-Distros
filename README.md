@@ -1,623 +1,597 @@
-# 🚢 K8s Cluster on RedHat Distros (SelfHosted)
+# 🚢 K8s Cluster on RedHat10 - Kubernetes Production Setup
+### 🐧 RHEL 10 · Rocky Linux 10 · AlmaLinux 10
+### 🕸️ Calico (NFT) · 🧲 MetalLB · 🚦 F5 NGINX Ingress Controller
 
-*A complete step-by-step guide to deploy a 3-node Kubernetes cluster.*
-
-> **Important Notes Before Starting:**
-> - ✅ Kubernetes v1.36.1
-> - ✅ All commands run as root or with sudo
-> - ✅ Ensure nodes can reach the internet for package downloads
+This is the **final, fully documented Standard Operating Procedure (SOP)**. It includes plain-English explanations of *why* we are doing each step, inline bash comments, and every battle-tested fix required for RHEL 10's unique security and networking landscape.
 
 ---
 
-## 📦 Technology Stack
+## 🧠 Architecture & Component Overview
 
-| Component | Version | Purpose |
-|-----------|---------|---------|
-| 🧠 Kubernetes | v1.36.1 | Container orchestration platform |
-| 🐳 Container Runtime | containerd v1.7.x | Low-level runtime to run containers |
-| 🌐 Network (CNI) | Calico v3.32.0 | Pod networking & network policies |
-| ⚖️ Load Balancer | MetalLB v0.15.3 | Bare-metal LoadBalancer services |
-| 🚦 Ingress | NGINX Ingress v1.15.1 | HTTP/HTTPS routing & TLS termination |
+Before typing commands, it helps to understand what each piece of the puzzle actually does and how traffic flows from the outside world into your containers.
+
+```text
+                               🌐 External Client / Internet
+                                          │
+                                          ▼
+┌──────────────────────────────────────────────────────────────────────────────────────────────┐
+│                                     🏢 PHYSICAL LAN (10.0.0.x)                               │
+│                                                                                              │
+│   🧲 MetalLB (Layer 2 ARP)                                                                   │
+│   Answers ARP requests for the Ingress IP (10.0.0.200) and pulls traffic into K8s.           │
+│          │                                                                                   │
+│          ▼                                                                                   │
+│   ┌──────────────────────────────────────────────────────────────────────────────────────┐   │
+│   │                        ☸️ Kubernetes Cluster (v1.32.x / AlmaLinux 10)                │   │
+│   │                                                                                      │   │
+│   │   🚦 NGINX Ingress Controller (Layer 7 HTTP Routing)                                 │   │
+│   │   Inspects Host headers (e.g., test.local) and routes to backend Services.           │   │
+│   │          │                                                                           │   │
+│   │          ▼                                                                           │   │
+│   │   🕸️ Calico CNI (VXLAN Overlay / NFT Dataplane)                                      │   │
+│   │   Provides Pod IPs (192.168.0.0/16) and secure cross-node tunneling.                 │   │
+│   │          │                                                                           │   │
+│   │          ▼                                                                           │   │
+│   │   🚀 App Pods (e.g., hashicorp/http-echo)                                            │   │
+│   │   Managed by 🛠️ kubelet and executed by 🐳 containerd on 👷 Worker Nodes.             │   │
+│   │                                                                                      │   │
+│   │   🧠 Control Plane (k8s-master)                                                      │   │
+│   │   ┣━ 🗄️ etcd (Database)       ┣━ ⚙️ kube-apiserver (API Gateway)                     │   │
+│   │   ┗━ 📅 kube-scheduler         ┗━ 🔄 kube-controller-manager                         │   │
+│   └──────────────────────────────────────────────────────────────────────────────────────┘   │
+└──────────────────────────────────────────────────────────────────────────────────────────────┘
+```
+
+### 📋 Component Glossary
+
+| Component | What it does (Plain English) |
+| :--- | :--- |
+| ☸️ **Kubernetes (K8s)** | The "operating system" for your cluster. It schedules containers, heals them if they crash, and scales them. |
+| 🐳 **Containerd** | The actual engine that downloads images and runs the containers on the Linux kernel. |
+| 🕸️ **Calico (CNI)** | The "virtual network switch". It gives every pod its own IP address and creates encrypted tunnels (VXLAN) so pods on different physical servers can talk to each other. |
+| 🧲 **MetalLB** | The "bare-metal cloud provider". Clouds give you Load Balancers automatically; bare-metal doesn't. MetalLB tricks your local network router into thinking your K8s cluster is a physical device by answering ARP requests. |
+| 🚦 **NGINX Ingress** | The "smart HTTP router". While MetalLB operates at Layer 4 (TCP/IP), NGINX operates at Layer 7 (HTTP). It looks at the URL (e.g., `app.local`) and routes traffic to the correct internal pod. |
+
+### 🌐 Network Topology
+
+| Setting | Value | Why? |
+| :--- | :--- | :--- |
+| **Pod CIDR** | `192.168.0.0/16` | The private IP pool Calico will draw from to assign IPs to containers. |
+| **Service CIDR** | `10.96.0.0/12` | The internal virtual IPs K8s uses for ClusterIP services (like DNS). |
+| **MetalLB Pool** | `10.0.0.201 – 220` | Free IPs on your *physical* LAN that MetalLB is allowed to hand out. |
+| **Ingress IP** | `10.0.0.200` | A dedicated, pinned LAN IP exclusively for the NGINX Ingress Controller. |
 
 ---
 
-## 🗂️ Cluster Specification
+## 🛠️ Step 1 — OS Preparation `[ALL]`
+*Run these steps on **all 3 nodes** (Master and Workers).*
 
-| Role | Hostname | IP Address | Requirements |
-|------|----------|------------|-------------|
-| 🎛️ Control Plane | k8s-master | master-ip | 2+ CPU, 2GB+ RAM |
-| 👷 Worker Node | k8s-node1 | node1-ip | 2+ CPU, 2GB+ RAM |
-| 👷 Worker Node | k8s-node2 | node2-ip | 2+ CPU, 2GB+ RAM |
-
-> 💡 Replace master-ip, node1-ip, node2-ip with your actual IPs
-
----
-
-## ✅ Pre-Installation Checklist (Run on All Nodes)
-
-> **What this does:** Prepares the OS foundation for Kubernetes by disabling swap (required by kubelet), updating packages, and setting up time synchronization.  
-> **Why install:** Kubernetes components expect a clean, synchronized, and swap-free environment to schedule pods reliably.  
-> **If skipped:** Kubelet may fail to start, pods could be evicted unexpectedly, or time-sensitive operations (like TLS/certs) may break.
+### 1.1 🏷️ Local DNS Resolution
+> 🧠 **What this does:** K8s nodes must be able to find each other by name. Since we don't have a local DNS server configured for these static IPs, we hardcode them into the local `/etc/hosts` file.
 
 ```bash
-# Disable swap permanently (kubelet requires this)
-sudo swapoff -a
-sudo sed -i '/^\([^#].*swap.*\)/s/^/#/' /etc/fstab
+# Set a unique hostname for the machine you are currently on
+sudo hostnamectl set-hostname <k8s-master|k8s-node1|k8s-node2>
 
-# Update system packages to latest stable versions
-sudo dnf update -y
-sudo dnf install -y kernel-modules dnf-plugins-core chrony
+# Inject the cluster roster into the local hosts file
+sudo tee /etc/hosts <<'EOF'
+127.0.0.1   localhost localhost.localdomain localhost4 localhost4.localdomain4
+::1         localhost localhost.localdomain localhost6 localhost6.localdomain6
 
-# Enable and start chronyd for time synchronization
-sudo systemctl enable --now chronyd
-sudo systemctl start chronyd
-
-# Set timezone to UTC for consistent cluster logging
-sudo timedatectl set-timezone UTC
-```
-
----
-
-## 🖥️ 1. Hostname & Network Configuration (Run on All Nodes)
-
-### 1.1 🏷️ Set Hostnames
-
-> **What this does:** Assigns a unique, resolvable hostname to each node.  
-> **Why install:** Kubernetes uses hostnames for node identity, certificate validation, and API communication.  
-> **If skipped:** Nodes may fail to join the cluster, or certificates may not validate, causing authentication errors.
-
-```bash
-# Set hostname on control plane node
-sudo hostnamectl set-hostname k8s-master
-```
-```
-# Set hostname on first worker node
-sudo hostnamectl set-hostname k8s-node1
-```
-```
-# Set hostname on second worker node
-sudo hostnamectl set-hostname k8s-node2
-```
-```
-# Reload shell to apply hostname changes immediately
-exec bash
-```
-
-### 1.2 🌐 Configure Static IP
-
-> **What this does:** Assigns a fixed IP address to each node's network interface.  
-> **Why install:** Kubernetes components communicate via stable IPs; dynamic IPs can break cluster connectivity.  
-> **If skipped:** Nodes may lose connectivity after reboot, causing pod evictions or control plane unreachable errors.
-
-```bash
-# List available network interfaces to identify the correct one
-nmcli device status
-
-# Configure static IP, gateway, and DNS (replace placeholders)
-sudo nmcli connection modify <interface-name> \
-  ipv4.method manual \
-  ipv4.addresses <your-node-ip>/24 \
-  ipv4.gateway <your-gateway-ip> \
-  ipv4.dns "8.8.8.8,1.1.1.1" \
-  connection.autoconnect yes
-
-# Restart network connection to apply new settings
-sudo nmcli connection down <interface-name> && sudo nmcli connection up <interface-name>
-```
-
-### 1.3 📝 Update /etc/hosts (All Nodes)
-
-> **What this does:** Creates local hostname-to-IP mappings for cluster nodes.  
-> **Why install:** Ensures nodes can resolve each other by hostname without external DNS.  
-> **If skipped:** kubeadm join may fail with "node not found" or certificate hostname mismatch errors.
-
-```bash
-# Append cluster node mappings to hosts file on every node
-sudo tee -a /etc/hosts <<EOF
-
-# Kubernetes Cluster Nodes
-<master-ip>   k8s-master
-<node1-ip>    k8s-node1
-<node2-ip>    k8s-node2
+10.0.0.150  k8s-master
+10.0.0.151  k8s-node1
+10.0.0.152  k8s-node2
 EOF
 ```
 
-### 1.4 🔄 Reboot All Nodes
-
-> **What this does:** Applies all hostname, network, and kernel changes.  
-> **Why install:** Ensures a clean state before installing Kubernetes components.  
-> **If skipped:** Some settings (like kernel modules or hostname) may not take effect, causing subtle failures later.
+### 1.2 🚫 Disable Swap
+> 🧠 **What this does:** K8s guarantees resource limits (QoS). If Linux moves container memory to a slow swap disk, those guarantees break, and the cluster becomes unstable. Kubelet will flat-out refuse to start if swap is on. RHEL 10 uses `zram` (compressed RAM swap) by default, which must also be removed.
 
 ```bash
-# Reboot to apply all system changes
+# Turn off swap immediately in memory
+sudo swapoff -a
+# Comment out swap entries in fstab so it stays off after reboot
+sudo sed -i '/\bswap\b/s/^/#/' /etc/fstab
+# Disable and remove RHEL 10's zram swap generator
+sudo systemctl disable --now swap.target 2>/dev/null || true
+sudo dnf remove -y zram-generator-defaults 2>/dev/null || true
+```
+
+### 1.3 📦 Install OS Dependencies & Kernel Modules
+> 🧠 **What this does:** Installs the tools K8s needs. Crucially, in RHEL 10, the `br_netfilter` module (which allows iptables/nftables to see bridged container traffic) was moved out of the base kernel into `kernel-modules-extra`.
+
+```bash
+sudo dnf install -y \
+  curl wget git vim bash-completion \
+  iproute iproute-tc ipvsadm ipset socat conntrack-tools \
+  kernel-modules-extra nftables \
+  setools-console policycoreutils-python-utils \
+  setroubleshoot-server audit chrony yum-utils
+```
+
+### 1.4 ⚠️ MANDATORY REBOOT
+> 🧠 **What this does:** Aligns your running kernel with the newly installed `kernel-modules-extra`. If you skip this, `modprobe br_netfilter` will fail, and Calico will never start.
+
+```bash
 sudo reboot
 ```
+*(⏳ Log back into all 3 nodes after they reboot)*
 
----
-
-## ⚙️ 2. System Preparation (Run on All Nodes)
-
-### 2.1 🔌 Load Kernel Modules
-
-> **What this does:** Loads `overlay` and `br_netfilter` kernel modules required for pod networking.  
-> **Why install:** Kubernetes CNI plugins and kube-proxy rely on these for container isolation and iptables rules.  
-> **If skipped:** Pods may not communicate, network policies won't work, or kube-proxy fails to program rules.
+### 1.5 🧱 Firewall & Webhook Trust Zones
+> 🧠 **What this does:** RHEL's `firewalld` blocks traffic crossing between the physical NIC and virtual CNI bridges. Furthermore, K8s "Webhooks" (used by MetalLB and NGINX to validate configs) require the API server to talk to internal Pod IPs. Adding the Pod and Service CIDRs to the `trusted` zone permanently prevents "no route to host" and "connection refused" webhook errors.
 
 ```bash
-# Load bridge networking module immediately
-sudo modprobe bridge
+NODE_HOSTNAME=$(hostname)
+sudo systemctl enable --now firewalld
 
-# Install extra kernel modules for container networking
-sudo dnf install -y kernel-modules-extra
+# --- 🤝 TRUST CLUSTER NETWORKS (Fixes Webhooks & API Routing) ---
+sudo firewall-cmd --zone=trusted --add-source=10.0.0.150/32 --permanent
+sudo firewall-cmd --zone=trusted --add-source=10.0.0.151/32 --permanent
+sudo firewall-cmd --zone=trusted --add-source=10.0.0.152/32 --permanent
+sudo firewall-cmd --zone=trusted --add-source=192.168.0.0/16 --permanent # Calico Pod CIDR
+sudo firewall-cmd --zone=trusted --add-source=10.96.0.0/12 --permanent   # K8s Service CIDR
 
-# Persist required kernel modules across reboots
-sudo tee /etc/modules-load.d/k8s.conf > /dev/null <<EOF
+# --- 🔓 COMMON PORTS (All Nodes) ---
+sudo firewall-cmd --permanent --add-service=ntp          # Time sync
+sudo firewall-cmd --permanent --add-port=10250/tcp       # Kubelet API
+sudo firewall-cmd --permanent --add-port=179/tcp         # Calico BGP
+sudo firewall-cmd --permanent --add-port=4789/udp        # Calico VXLAN overlay
+sudo firewall-cmd --permanent --add-port=5473/tcp        # Calico Typha
+sudo firewall-cmd --permanent --add-port=9099/tcp        # Calico Felix Health
+sudo firewall-cmd --permanent --add-port=7946/tcp        # MetalLB Gossip
+sudo firewall-cmd --permanent --add-port=7946/udp        # MetalLB Gossip
+
+# --- 🧠 CONTROL PLANE PORTS (Master Only) ---
+if [[ "$NODE_HOSTNAME" == *"master"* ]]; then
+  sudo firewall-cmd --permanent --add-port=6443/tcp      # K8s API Server
+  sudo firewall-cmd --permanent --add-port=2379-2380/tcp # etcd database
+  sudo firewall-cmd --permanent --add-port=10257/tcp     # controller-manager
+  sudo firewall-cmd --permanent --add-port=10259/tcp     # scheduler
+fi
+
+# --- 👷 WORKER PORTS (Workers Only) ---
+if [[ "$NODE_HOSTNAME" == *"node"* ]]; then
+  sudo firewall-cmd --permanent --add-port=30000-32767/tcp # NodePort TCP
+  sudo firewall-cmd --permanent --add-port=30000-32767/udp # NodePort UDP
+  sudo firewall-cmd --permanent --add-service=http         # Ingress HTTP
+  sudo firewall-cmd --permanent --add-service=https        # Ingress HTTPS
+  sudo firewall-cmd --permanent --add-port=8443/tcp        # NGINX Webhook
+  sudo firewall-cmd --permanent --add-port=9113/tcp        # NGINX Metrics
+fi
+
+# Apply all firewall changes to the running kernel
+sudo firewall-cmd --reload
+```
+
+### 1.6 ⏱️ Sync System Clock (NTP)
+> 🧠 **What this does:** K8s uses TLS certificates for all internal communication. If clocks drift by more than a few minutes between nodes, certificates are rejected as "expired" or "not yet valid", and the cluster breaks.
+
+```bash
+sudo systemctl enable --now chronyd
+sudo chronyc makestep     # Force immediate time correction
+sudo timedatectl set-ntp true
+```
+
+### 1.7 🧩 Load Kernel Modules
+> 🧠 **What this does:** 
+> * `overlay`: The filesystem driver that allows containers to have layered, lightweight filesystems.
+> * `br_netfilter`: Allows the host's firewall to inspect traffic passing between containers on a virtual bridge.
+> * `ip_vs` / `nf_conntrack`: High-performance kernel load-balancing and connection tracking.
+
+```bash
+sudo modprobe overlay br_netfilter ip_vs ip_vs_rr ip_vs_wrr ip_vs_sh nf_conntrack
+
+# Persist modules across reboots
+sudo tee /etc/modules-load.d/k8s.conf <<'EOF'
 overlay
 br_netfilter
+ip_vs
+ip_vs_rr
+ip_vs_wrr
+ip_vs_sh
+nf_conntrack
 EOF
-
-# Load modules now without reboot
-sudo modprobe overlay
-sudo modprobe br_netfilter
 ```
 
-### 2.2 🎚️ Configure Sysctl Parameters
-
-> **What this does:** Enables IP forwarding and bridge traffic inspection via iptables.  
-> **Why install:** Required for pod-to-pod communication across nodes and proper network policy enforcement.  
-> **If skipped:** Pods on different nodes cannot communicate; Calico network policies will not function.
+### 1.8 ⚙️ Configure Kernel Parameters (sysctl)
+> 🧠 **What this does:** 
+> * `ip_forward`: Allows the Linux kernel to act as a router (required for pod traffic).
+> * `rp_filter`: Reverse Path filtering prevents IP spoofing, but it *breaks* VXLAN overlay networks because the source IP of encapsulated packets looks "asymmetric". We must set it to 0.
 
 ```bash
-# Write required sysctl settings for Kubernetes networking
-sudo tee /etc/sysctl.d/k8s.conf > /dev/null <<EOF
+# Replace ens160 with your actual NIC name if different
+sudo tee /etc/sysctl.d/k8s.conf <<'EOF'
 net.bridge.bridge-nf-call-iptables  = 1
 net.bridge.bridge-nf-call-ip6tables = 1
-net.ipv4.ip_forward                 = 1
+net.ipv4.ip_forward = 1
+net.ipv4.conf.all.rp_filter         = 0
+net.ipv4.conf.default.rp_filter     = 0
+net.ipv4.conf.ens160.rp_filter      = 0
+net.netfilter.nf_conntrack_max = 524288
+fs.inotify.max_user_instances = 8192
+fs.inotify.max_user_watches   = 524288
 EOF
 
-# Apply sysctl settings immediately and persist them
 sudo sysctl --system
+sudo sysctl -w net.ipv4.conf.ens160.rp_filter=0
 ```
 
-### 2.3 🛡️ Configure SELinux
-
-> **What this does:** Installs SELinux policies that allow container runtimes to function under enforcing mode.  
-> **Why install:** Maintains system security while permitting Kubernetes operations.  
-> **If skipped:** Container processes may be blocked by SELinux, causing pod startup failures or permission denied errors.
+### 1.9 🛡️ Configure SELinux
+> 🧠 **What this does:** We **never** disable SELinux. Instead, we install the `container-selinux` policies and flip specific "booleans" that grant the container runtime permission to do necessary host-level tasks (like managing cgroups and proxying network traffic).
 
 ```bash
-# Install SELinux policies optimized for container workloads
 sudo dnf install -y container-selinux
+sudo semodule -B
 
-# Keep SELinux in enforcing mode for production security
-# For testing only: temporarily set to permissive if troubleshooting
-# sudo setenforce 0
-# sudo sed -i 's/^SELINUX=enforcing$/SELINUX=permissive/' /etc/selinux/config
+sudo setsebool -P container_manage_cgroup 1
+sudo setsebool -P container_use_devices 1
+sudo setsebool -P nis_enabled 1
+sudo setsebool -P httpd_can_network_connect 1
+sudo setsebool -P httpd_can_network_relay 1
 ```
 
-### 2.4 🔥 Configure Firewall Rules
-
-> **What this does:** Opens required ports for Kubernetes API, kubelet, and node services.  
-> **Why install:** Ensures control plane and worker nodes can communicate securely.  
-> **If skipped:** kubeadm init/join will timeout; nodes appear "NotReady"; services become unreachable.
-
-
-#### Open ports required (All Nodes)
-> **Port:10250** kubelet API: pod management, exec, logs, health checks.
-> **Port:30000-32767** NodePort services: external access to services.
-> **NAT masquerading:** enables pod egress to internet.
-```bash
-
-sudo firewall-cmd --permanent --add-port=10250/tcp       
-sudo firewall-cmd --permanent --add-port=30000-32767/tcp
-sudo firewall-cmd --permanent --add-masquerade           
-```
-```
-# Reload firewall to apply all new rules
-sudo firewall-cmd --reload
-```
-
-#### Open control-plane-specific ports (K8s-Master)
-> **Port:6443** kube-apiserver: main Kubernetes API endpoint.
-> **Port:2379-2380** etcd: cluster state storage (client and peer ports).
-> **Port:10259** kube-scheduler: metrics and health endpoint.
-> **Port:10257** kube-controller-manager: metrics and health endpoint.
+### 1.10 🐳 Install Containerd
+> 🧠 **What this does:** Installs the container runtime. We force `SystemdCgroup = true` so containerd and the Kubelet use the same resource management hierarchy (preventing CPU/Memory fighting). We also pin the `pause` image, which K8s uses to hold the network namespace open for pods.
 
 ```bash
-sudo firewall-cmd --permanent --add-port=6443/tcp        
-sudo firewall-cmd --permanent --add-port=2379-2380/tcp   
-sudo firewall-cmd --permanent --add-port=10259/tcp       
-sudo firewall-cmd --permanent --add-port=10257/tcp      
-```
-```
-# Reload firewall to apply all new rules
-sudo firewall-cmd --reload
-```
-
----
-
-## 🐳 3. Install containerd (Run on All Nodes)
-
-> **What this does:** Installs and configures containerd, the CRI-compatible container runtime.  
-> **Why install:** Kubernetes needs a runtime to pull and run container images; containerd is lightweight and CNCF-graduated.  
-> **If skipped:** kubelet cannot start pods; you'll see "container runtime not ready" errors.
-
-```bash
-# Add Docker's official repo to access containerd packages
 sudo dnf config-manager --add-repo https://download.docker.com/linux/rhel/docker-ce.repo
-
-# Install containerd runtime package
 sudo dnf install -y containerd.io
 
-# Create config directory and generate default configuration
 sudo mkdir -p /etc/containerd
 containerd config default | sudo tee /etc/containerd/config.toml > /dev/null
 
-# Enable systemd cgroup driver for kubelet compatibility
 sudo sed -i 's/SystemdCgroup = false/SystemdCgroup = true/' /etc/containerd/config.toml
+sudo sed -i 's|sandbox_image = "registry.k8s.io/pause:3.[0-9]*"|sandbox_image = "registry.k8s.io/pause:3.10"|' /etc/containerd/config.toml
 
-# Set pause image version matching Kubernetes requirements
-sudo sed -i 's|sandbox_image = ".*"|sandbox_image = "registry.k8s.io/pause:3.10"|' /etc/containerd/config.toml
-
-# Enable and start containerd service immediately
 sudo systemctl enable --now containerd
 ```
 
----
-
-## 🧱 4. Install Kubernetes Components (Run on All Nodes)
-
-> **What this does:** Installs kubeadm, kubelet, and kubectl from the official Kubernetes RPM repo.  
-> **Why install:** These are the core binaries to bootstrap, run, and manage the cluster.  
-> **If skipped:** You cannot initialize or join nodes to a Kubernetes cluster.
+### 1.11 📥 Install K8s Binaries
+> 🧠 **What this does:** 
+> * `kubeadm`: The bootstrap tool (used once to build the cluster).
+> * `kubelet`: The node agent (runs constantly, ensures pods are alive).
+> * `kubectl`: The CLI tool for you to talk to the cluster.
 
 ```bash
-# Add official Kubernetes v1.36 RPM repository with GPG verification
-cat <<EOF | sudo tee /etc/yum.repos.d/kubernetes.repo
+sudo tee /etc/yum.repos.d/kubernetes.repo <<'EOF'
 [kubernetes]
 name=Kubernetes
-baseurl=https://pkgs.k8s.io/core:/stable:/v1.36/rpm/
+baseurl=https://pkgs.k8s.io/core:/stable:/v1.32/rpm/
 enabled=1
 gpgcheck=1
-gpgkey=https://pkgs.k8s.io/core:/stable:/v1.36/rpm/repodata/repomd.xml.key
+gpgkey=https://pkgs.k8s.io/core:/stable:/v1.32/rpm/repodata/repomd.xml.key
 exclude=kubelet kubeadm kubectl cri-tools kubernetes-cni
 EOF
 
-# Install core Kubernetes binaries, excluding auto-upgrades
-sudo dnf install -y kubelet kubeadm kubectl cri-tools --disableexcludes=kubernetes
-
-# Lock package versions to prevent accidental cluster-breaking upgrades
-sudo dnf versionlock add kubelet kubeadm kubectl
-
-# Enable kubelet to start on boot (it waits for kubeadm init)
-sudo systemctl enable --now kubelet
+sudo dnf install -y kubelet kubeadm kubectl --disableexcludes=kubernetes
+sudo systemctl enable kubelet
 ```
 
 ---
 
-## 🎛️ 5. Initialize Control Plane (Only on k8s-master)
+## 🏗️ Step 2 — Initialise the Cluster `[CP]`
+*Run ONLY on `k8s-master`.*
 
-> **What this does:** Bootstraps the Kubernetes control plane components (API server, scheduler, controller-manager).  
-> **Why install:** Creates the cluster's brain that manages state, schedules pods, and exposes the API.  
-> **If skipped:** No cluster exists; worker nodes have nothing to join.
+### 2.1 📝 Create kubeadm Config File
+> 🧠 **What this does:** Defines the cluster blueprint. 
+> **⚠️ Crucial Fix:** We set `kube-proxy` to `mode: "iptables"`. In RHEL 10, this transparently uses `iptables-nft` under the hood. This prevents container privilege crashes and ensures internal ClusterIP routing (like Webhooks) works perfectly.
 
 ```bash
-# Pre-pull required control plane images to avoid timeout during init
-sudo kubeadm config images pull
+sudo mkdir -p /etc/kubernetes
+sudo tee /etc/kubernetes/kubeadm-config.yaml <<'EOF'
+apiVersion: kubeadm.k8s.io/v1beta4
+kind: InitConfiguration
+nodeRegistration:
+  criSocket: unix:///run/containerd/containerd.sock
+  name: k8s-master
+---
+apiVersion: kubeadm.k8s.io/v1beta4
+kind: ClusterConfiguration
+kubernetesVersion: v1.32.0
+controlPlaneEndpoint: "k8s-master:6443"
+networking:
+  podSubnet: "192.168.0.0/16"
+  serviceSubnet: "10.96.0.0/12"
+  dnsDomain: cluster.local
+---
+apiVersion: kubelet.config.k8s.io/v1beta1
+kind: KubeletConfiguration
+cgroupDriver: systemd
+---
+apiVersion: kubeproxy.config.k8s.io/v1alpha1
+kind: KubeProxyConfiguration
+mode: "iptables"
+EOF
+```
 
-# Initialize cluster with Calico CIDR and advertise master IP
-sudo kubeadm init \
-  --pod-network-cidr=192.168.0.0/16 \
-  --apiserver-advertise-address=<master-ip> \
-  --control-plane-endpoint=<master-ip> \
-  --upload-certs
+### 2.2 🚀 Bootstrap the Control Plane
+```bash
+# Initialize the master node and save the output to a log
+sudo kubeadm init --config /etc/kubernetes/kubeadm-config.yaml --upload-certs | tee /root/kubeadm-init.log
 
-# Setup kubectl config for current user to manage the cluster
+# Configure kubectl for your local user (DO NOT use sudo for kubectl)
 mkdir -p $HOME/.kube
 sudo cp -i /etc/kubernetes/admin.conf $HOME/.kube/config
 sudo chown $(id -u):$(id -g) $HOME/.kube/config
-
-# Generate and display join command for worker nodes
-kubeadm token create --print-join-command
 ```
+*⚠️ **Copy the `kubeadm join` command printed at the bottom of the output.***
+
+### 2.3 🤝 Join Worker Nodes `[W]`
+*Run the saved `kubeadm join` command on `k8s-node1` and `k8s-node2`.*
+*(💡 Note: If a worker gets an "empty config.yaml" crash loop, run `sudo kubeadm reset -f`, `sudo rm -rf /var/lib/kubelet`, and try the join command again).*
 
 ---
 
-## 👷 6. Join Worker Nodes (On k8s-node1 & k8s-node2)
+## 🕸️ Step 3 — Install Calico CNI `[CP]`
+*Run ONLY on `k8s-master`.*
 
-> **What this does:** Registers worker nodes with the control plane using a secure token.  
-> **Why install:** Workers execute pods scheduled by the control plane; without them, no workloads run.  
-> **If skipped:** Cluster has no compute capacity; pods remain pending.
+> 🧠 **What this does:** Deploys the Tigera Operator, which acts as a "manager" to install and maintain Calico. We explicitly wait for the Custom Resource Definitions (CRDs) to register before applying the config, avoiding a common race condition.
 
 ```bash
-# Run the join command generated on master (includes token and CA hash)
-sudo kubeadm join <master-ip>:6443 --token <token> \
-  --discovery-token-ca-cert-hash sha256:<hash>
-```
-
----
-
-## 🌐 7. Install Calico CNI (On Master)
-
-> **What this does:** Installs Calico, a CNI plugin providing pod networking and network policies.  
-> **Why install:** Kubernetes needs a CNI for pod-to-pod communication; Calico adds robust policy enforcement.  
-> **If skipped:** Pods cannot communicate across nodes; network policies won't work; cluster stays "NotReady".
-
-### 🔥Open Firewall ports for Calico to work on all nodes:
-```bash
-# Allow BGP (TCP 179) permanently
-sudo firewall-cmd --add-port=179/tcp --permanent
-
-# If using VXLAN (default in many Calico installs), also allow:
-sudo firewall-cmd --add-port=4789/udp --permanent
-
-# Allow Calico Typha communication (TCP 5473)
-sudo firewall-cmd --add-port=5473/tcp --permanent
-
-# If using WireGuard (less common), allow:
-sudo firewall-cmd --add-port=51820/udp --permanent
-
-# Reload firewall to apply changes
-sudo firewall-cmd --reload
-```
-### Legacy Minimal Install Method:
-```bash
-# Apply Calico manifest for basic installation
-kubectl apply -f https://docs.projectcalico.org/manifests/calico.yaml
-```
-### Verify Calico running:
-```
-kubectl get pod -n kube-system
-```
-```Output:
-NAME                                      READY   STATUS    RESTARTS        AGE
-calico-kube-controllers-c57dfffd6-t4bm4   1/1     Running   0               8m53s
-calico-node-4d48b                         1/1     Running   0               8m53s
-calico-node-pqqvh                         1/1     Running   0               8m53s
-calico-node-vn5kf                         1/1     Running   0               8m53s
-coredns-589f44dc88-82tp2                  1/1     Running   0               148m
-coredns-589f44dc88-p88vn                  1/1     Running   0               148m
-etcd-k8s-master                           1/1     Running   2 (10m ago)     148m
-kube-apiserver-k8s-master                 1/1     Running   2 (10m ago)     148m
-kube-controller-manager-k8s-master        1/1     Running   3 (5m48s ago)   148m
-kube-proxy-5wf2x                          1/1     Running   2 (10m ago)     148m
-kube-proxy-c5mp8                          1/1     Running   2 (10m ago)     146m
-kube-proxy-r86rz                          1/1     Running   2 (10m ago)     148m
-kube-scheduler-k8s-master                 1/1     Running   3 (5m44s ago)   148m
-```
-
-Or
-
-### New Operator Install Method:
-```bash
-# Prevent NetworkManager from managing Calico interfaces
-sudo mkdir -p /etc/NetworkManager/conf.d/
-sudo tee /etc/NetworkManager/conf.d/calico.conf > /dev/null <<EOF
-[keyfile]
-unmanaged-devices=interface-name:cali*;interface-name:tunl*;interface-name:vxlan.calico
-EOF
-sudo systemctl reload NetworkManager
-```
-```
-# Install Calico operator for lifecycle management
 kubectl create -f https://raw.githubusercontent.com/projectcalico/calico/v3.32.0/manifests/tigera-operator.yaml
+
+# ⏳ Wait for API server to recognize Calico resource types
+kubectl wait --for condition=established --timeout=120s crd/installations.operator.tigera.io
+kubectl wait --for condition=established --timeout=120s crd/apiservers.operator.tigera.io
+
+# Tell the Operator to install Calico using the NFT dataplane and VXLAN
+kubectl apply -f - <<'EOF'
+apiVersion: operator.tigera.io/v1
+kind: Installation
+metadata:
+  name: default
+spec:
+  calicoNetwork:
+    linuxDataplane: Nftables
+    ipPools:
+      - name: default-ipv4-ippool
+        blockSize: 26
+        cidr: 192.168.0.0/16
+        encapsulation: VXLANCrossSubnet
+        natOutgoing: Enabled
+        nodeSelector: all()
+---
+apiVersion: operator.tigera.io/v1
+kind: APIServer
+metadata:
+  name: default
+spec: {}
+EOF
 ```
-### Verify the tigera-operator is running:
+
+### 3.2 🛠️ Install and Configure `calicoctl`
+> 🧠 **What this does:** Installs the Calico CLI. Notice the `<<EOF` (without quotes) on the config file generation—this allows `$(whoami)` to dynamically inject your current user's home directory, ensuring `sudo calicoctl` works without permission errors.
+
+```bash
+curl -sLO https://github.com/projectcalico/calico/releases/download/v3.32.0/calicoctl-linux-amd64
+sudo install -o root -g root -m 0755 calicoctl-linux-amd64 /usr/local/bin/calicoctl
+rm -f calicoctl-linux-amd64
+
+sudo mkdir -p /etc/calico
+sudo tee /etc/calico/calicoctl.cfg <<EOF
+apiVersion: projectcalico.org/v3
+kind: CalicoAPIConfig
+metadata:
+spec:
+  datastoreType: kubernetes
+  kubeconfig: /home/$(whoami)/.kube/config
+EOF
+
+# Disable BGP Full Mesh (we are using VXLAN overlay, not physical BGP routers)
+# Configure Felix (the node agent) for optimal logging and health checks
+sudo /usr/local/bin/calicoctl apply -f - <<'EOF'
+apiVersion: projectcalico.org/v3
+kind: BGPConfiguration
+metadata:
+  name: default
+spec:
+  logSeverityScreen: Info
+  nodeToNodeMeshEnabled: false
+  asNumber: 64512
+---
+apiVersion: projectcalico.org/v3
+kind: FelixConfiguration
+metadata:
+  name: default
+spec:
+  logSeverityScreen: Warning
+  healthEnabled: true
+  healthPort: 9099
+  defaultEndpointToHostAction: Accept
+  bpfEnabled: false
+  wireguardEnabled: false
+EOF
 ```
-kubectl get pod -n tigera-operator
-```
-```Output:
-NAME                               READY   STATUS    RESTARTS   AGE
-tigera-operator-85dbff4478-x2ltj   1/1     Running   0          26m
-```
-Wait till the tigera-operator pod is running.
-```
-# Apply custom resources to activate Calico with default settings
-kubectl create -f https://raw.githubusercontent.com/projectcalico/calico/v3.32.0/manifests/custom-resources.yaml
-```
-### Verify is the Calico is running:
-```
-kubectl get pod -n calico-system
-```
-```Output:
-NAME                                       READY   STATUS    RESTARTS        AGE
-calico-apiserver-c8747b9dc-9mfcv           1/1     Running   1 (8m53s ago)   44m
-calico-apiserver-c8747b9dc-h7npk           1/1     Running   1 (8m53s ago)   44m
-calico-kube-controllers-78b4dbb59c-h5rww   1/1     Running   1 (8m53s ago)   44m
-calico-node-27bjn                          1/1     Running   0               44m
-calico-node-jzmzd                          1/1     Running   1 (8m53s ago)   14m
-calico-node-zpr9q                          1/1     Running   0               44m
-calico-typha-657bc8d4d8-4w4k7              1/1     Running   0               44m
-calico-typha-657bc8d4d8-5qvk8              1/1     Running   0               44m
-csi-node-driver-ctqbl                      2/2     Running   0               44m
-csi-node-driver-jq7cg                      2/2     Running   2 (8m53s ago)   44m
-csi-node-driver-rsmmf                      2/2     Running   0               44m
-goldmane-6885dcb7d-fc6gk                   1/1     Running   1 (8m53s ago)   44m
-whisker-644f746ccf-gfnjp                   2/2     Running   2 (8m53s ago)   42m
-```
+
 ---
 
-## ⚖️ 8. Install MetalLB (On Master)
+## 🧲 Step 4 — Install MetalLB `[CP]`
 
-> **What this does:** Deploys MetalLB to provide LoadBalancer-type services on bare-metal clusters.  
-> **Why install:** Cloud LoadBalancers aren't available on-prem; MetalLB assigns real IPs to services.  
-> **If skipped:** Services of type LoadBalancer stay in "Pending" state with no external IP.
-> 
-### 🔥Open Firewall ports for MetalLB to work on all nodes:
+> 🧠 **What this does:** Bare-metal servers don't have AWS/GCP Load Balancers. MetalLB solves this by listening for ARP requests on your local network ("Who has 10.0.0.200?") and answering them, effectively pulling external traffic into the K8s cluster.
+
 ```bash
-# === MetalLB Firewall Configuration ===
+# Install MetalLB in native Layer 2 mode
+kubectl apply -f https://raw.githubusercontent.com/metallb/metallb/v0.16.0/config/manifests/metallb-native.yaml
+kubectl wait --namespace metallb-system --for=condition=Ready pod --selector=app=metallb --timeout=180s
 
-# 1. Allow MetalLB validating webhook (TCP 9443)
-#    Permits the Kubernetes API server to reach the MetalLB controller for CRD validation
-sudo firewall-cmd --permanent --add-port=9443/tcp
-
-# 2. Allow IPIP encapsulation (IP Protocol 4)
-#    Required by Calico CNI for cross-node pod traffic over the tunl0 interface
-sudo firewall-cmd --permanent --add-rich-rule='rule protocol value="ipip" accept'
-
-# 3. Reload firewalld to apply permanent rules to the running configuration
-sudo firewall-cmd --reload
-```
-### Deploy MetalLB
-```bash
-# Deploy MetalLB native manifest with controller and speaker pods
-kubectl apply -f https://raw.githubusercontent.com/metallb/metallb/v0.15.3/config/manifests/metallb-native.yaml
-
-# Wait for MetalLB controller to be ready before configuring
-kubectl wait --namespace=metallb-system \
-  --for=condition=ready pod \
-  --selector=component=controller \
-  --timeout=90s
-```
-### Verify if the metallb-system is running
-```
-kubectl get pod -n metallb-system
-```
-```Output:
-NAME                         READY   STATUS    RESTARTS   AGE
-controller-f59dc4bc7-h895q   1/1     Running   0          109s
-speaker-fhd5j                1/1     Running   0          109s
-speaker-gxlv4                1/1     Running   0          109s
-speaker-qtj2d                1/1     Running   0          109s
-```
-### Configure IPAddressPool
-```bash
-# Create MetalLB configuration with IP pool and L2 advertisement
-cat <<EOF > metallb-config.yaml
+# Define the IP pools and advertise them via Layer 2 ARP
+kubectl apply -f - <<'EOF'
 apiVersion: metallb.io/v1beta1
 kind: IPAddressPool
 metadata:
-  name: first-pool
+  name: primary-pool
   namespace: metallb-system
 spec:
   addresses:
-  - <your-external-ip-range>
-
+    - 10.0.0.201-10.0.0.220
+  autoAssign: true
+---
+apiVersion: metallb.io/v1beta1
+kind: IPAddressPool
+metadata:
+  name: ingress-pool
+  namespace: metallb-system
+spec:
+  addresses:
+    - 10.0.0.200/32
+  autoAssign: false
 ---
 apiVersion: metallb.io/v1beta1
 kind: L2Advertisement
 metadata:
-  name: example
+  name: primary-l2
   namespace: metallb-system
+spec:
+  ipAddressPools: [primary-pool]
+---
+apiVersion: metallb.io/v1beta1
+kind: L2Advertisement
+metadata:
+  name: ingress-l2
+  namespace: metallb-system
+spec:
+  ipAddressPools: [ingress-pool]
+EOF
+```
+
+---
+
+## 🚦 Step 5 — Install NGINX Ingress Controller `[CP]`
+
+> 🧠 **What this does:** While MetalLB gets traffic *into* the cluster, it doesn't know HTTP URLs. NGINX Ingress looks at the `Host: app.local` header and routes traffic to the correct internal Service. We use a `find` command to guarantee all F5 Custom Resource Definitions (VirtualServer, Policy) are applied, preventing startup crash loops.
+
+```bash
+git clone https://github.com/nginx/kubernetes-ingress.git --branch v5.2.1 --depth 1
+cd kubernetes-ingress
+
+# Apply RBAC, ConfigMaps, and IngressClass
+kubectl apply -f deployments/common/ns-and-sa.yaml
+kubectl apply -f deployments/rbac/rbac.yaml
+kubectl apply -f deployments/common/nginx-config.yaml
+kubectl apply -f deployments/common/ingress-class.yaml
+
+# 🔍 Bulletproof CRD installation (finds all YAMLs in the crds folder)
+find deployments/common/crds -type f -name "*.yaml" -exec kubectl apply -f {} \;
+
+# Deploy the controller and wait for it to be ready
+kubectl apply -f deployments/deployment/nginx-ingress.yaml
+kubectl rollout status deployment nginx-ingress -n nginx-ingress --timeout=180s
+
+# Expose NGINX to the physical network via MetalLB (Pinned to 10.0.0.200)
+kubectl apply -f - <<'EOF'
+apiVersion: v1
+kind: Service
+metadata:
+  name: nginx-ingress
+  namespace: nginx-ingress
+  annotations:
+    metallb.universe.tf/address-pool: ingress-pool
+    metallb.universe.tf/loadBalancerIPs: 10.0.0.200
+spec:
+  type: LoadBalancer
+  selector:
+    app: nginx-ingress
+  ports:
+    - name: http
+      port: 80
+      targetPort: 80
+    - name: https
+      port: 443
+      targetPort: 443
 EOF
 
-# Apply the MetalLB configuration to activate IP assignment
-kubectl apply -f metallb-config.yaml
-```
-
-> 💡 IP range must be in same L2 subnet as nodes, not in DHCP range, and not overlapping with node IPs. Example: `10.0.0.200-10.0.0.220`
-
----
-
-## 🚦 9. Install NGINX Ingress Controller (On Master)
-
-> **What this does:** Deploys NGINX Ingress to route external HTTP/HTTPS traffic to cluster services.  
-> **Why install:** Provides a single entry point with TLS termination, path-based routing, and host rules.  
-> **If skipped:** No easy way to expose web apps; you'd need NodePorts or manual reverse proxies.
-
-```bash
-# Deploy NGINX Ingress Controller for bare-metal environments
-kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.15.1/deploy/static/provider/baremetal/deploy.yaml
-
-# Wait for ingress controller pod to be ready before testing
-kubectl wait --namespace=ingress-nginx \
-  --for=condition=ready pod \
-  --selector=app.kubernetes.io/component=controller \
-  --timeout=120s
+# Make NGINX the default ingress class so you don't have to specify it on every rule
+kubectl annotate ingressclass nginx ingressclass.kubernetes.io/is-default-class="true"
 ```
 
 ---
 
-## ✅ 10. Verification
+## 🧪 Step 6 — The Flawless End-to-End Test `[CP]`
 
-> **What this does:** Confirms all components are running and the cluster is healthy.  
-> **Why install:** Validates your deployment before deploying applications.  
-> **If skipped:** You might deploy apps to a broken cluster and waste debugging time.
+> 🧠 **What this does:** Deploys a tiny web server, creates a K8s Service for it, and creates an Ingress Rule telling NGINX to route `test.local` to it. This validates the entire chain: **User ➡️ MetalLB (L2) ➡️ NGINX Pod (L7) ➡️ App Pod**.
 
 ```bash
-# Verify all nodes are in Ready status
-kubectl get nodes
+kubectl apply -f - <<'EOF'
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hello
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: hello
+  template:
+    metadata:
+      labels:
+        app: hello
+    spec:
+      containers:
+        - name: hello
+          image: hashicorp/http-echo:0.2.3
+          args:
+            - "-text=Hello from AlmaLinux 10 K8s!"
+          ports:
+            - containerPort: 5678
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: hello
+spec:
+  selector:
+    app: hello
+  ports:
+    - port: 80
+      targetPort: 5678
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: hello-ingress
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: test.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: hello
+                port:
+                  number: 80
+EOF
 
-# Check that system pods (kube-system, calico, metallb) are running
-kubectl get pods --all-namespaces
+# ⏳ Wait for pods to spin up
+kubectl rollout status deployment hello
 
-# Confirm ingress-nginx service received an external IP from MetalLB
-kubectl get svc -n ingress-nginx
+# 🌐 Test the routing! (Spoofing the Host header so NGINX knows where to send it)
+curl -H "Host: test.local" http://10.0.0.200
+```
+
+**Expected Output:**
+```text
+Hello from AlmaLinux 10 K8s!
 ```
 
 ---
 
-## 🔄 Cluster Reset / Clean State
-
-### Reset Worker Nodes (k8s-node1 & k8s-node2)
-
-> **What this does:** Removes Kubernetes state, network config, and runtime data to allow clean re-install.  
-> **Why install:** Essential for testing, re-provisioning, or recovering from misconfiguration.  
-> **If skipped:** Subsequent kubeadm init/join may fail with stale certificate or network errors.
+## 🧹 Appendix: Safe Node Reset (RHEL 10)
+*If a worker node completely breaks and you need to wipe it and rejoin it, use this script. It uses `nft` instead of the deprecated `iptables` command to safely flush the network rules.*
 
 ```bash
-# Reset kubeadm state and remove cluster configuration
-sudo kubeadm reset -f
+sudo kubeadm reset --force --cri-socket unix:///run/containerd/containerd.sock
+sudo rm -rf /etc/cni/net.d /var/lib/cni /var/lib/kubelet /etc/kubernetes
+sudo ip link delete vxlan.calico 2>/dev/null || true
+sudo ip link delete cali+ 2>/dev/null || true
 
-# Remove CNI network configuration files
-sudo rm -rf /etc/cni/net.d
+# 🧱 RHEL 10 uses nftables natively
+sudo nft flush ruleset 2>/dev/null || true
 
-# Remove kubelet data and registered pods
-sudo rm -rf /var/lib/kubelet
-
-# Remove etcd data (only relevant if node was control plane)
-sudo rm -rf /var/lib/etcd
-
-# Flush all iptables rules to clear stale network policies
-sudo iptables -F && sudo iptables -t nat -F && sudo iptables -t mangle -F && sudo iptables -X
-
-# Restart container runtime to clear container state
-sudo systemctl restart containerd
-
-# Restart kubelet to pick up clean configuration
-sudo systemctl restart kubelet
-
-# Remove user kubectl config
-sudo rm -rf $HOME/.kube
-```
-
-### Reset Master Node (k8s-master)
-
-> **What this does:** Fully wipes control plane state including etcd, certs, and manifests.  
-> **Why install:** Required when rebuilding the cluster from scratch or fixing critical control plane issues.  
-> **If skipped:** New cluster may inherit old certificates, tokens, or etcd corruption.
-
-```bash
-# Reset kubeadm and remove all control plane manifests
-sudo kubeadm reset -f
-
-# Remove Kubernetes configuration directory
-sudo rm -rf /etc/kubernetes
-
-# Remove kubelet working directory and pod state
-sudo rm -rf /var/lib/kubelet
-
-# Remove etcd data directory (critical for clean state)
-sudo rm -rf /var/lib/etcd
-
-# Remove CNI configuration to avoid network conflicts
-sudo rm -rf /etc/cni/net.d
-
-# Flush all firewall and NAT rules
-sudo iptables -F && sudo iptables -t nat -F && sudo iptables -t mangle -F && sudo iptables -X
-
-# Restart container runtime and kubelet services
 sudo systemctl restart containerd
 sudo systemctl restart kubelet
-
-# Remove local kubectl configuration
-sudo rm -rf $HOME/.kube
-```
-
-### Reboot All Nodes
-```bash
-# Final reboot to ensure clean kernel and network state
-sudo reboot
 ```
 ---
 
