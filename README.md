@@ -451,7 +451,17 @@ EOF
 Install MetalLB in native Layer 2 mode
 ```bash
 kubectl apply -f https://raw.githubusercontent.com/metallb/metallb/v0.16.0/config/manifests/metallb-native.yaml
-kubectl wait --namespace metallb-system --for=condition=Ready pod --selector=app=metallb --timeout=180s
+```
+```
+kubectl get pod -n metallb-system
+```
+Verify
+```
+NAME                          READY   STATUS    RESTARTS      AGE
+controller-76f4fb7cd8-t92bm   1/1     Running   1 (51s ago)   112s
+speaker-4qhlm                 1/1     Running   0             112s
+speaker-k64fj                 1/1     Running   0             112s
+speaker-wdx25                 1/1     Running   0             112s
 ```
 Define the IP pools and advertise them via Layer 2 ARP
 ```
