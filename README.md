@@ -30,7 +30,7 @@ Before typing commands, it helps to understand how traffic flows from the outsid
 
 ### 📋 Component Glossary
 
-| Component | What it does (Plain English) |
+| Component | What it does |
 | :--- | :--- |
 | ☸️ **Kubernetes (K8s)** | The "operating system" for your cluster. It schedules containers, heals them if they crash, and scales them. |
 | 🐳 **Containerd** | The actual engine that downloads images and runs the containers on the Linux kernel. |
@@ -49,17 +49,23 @@ Before typing commands, it helps to understand how traffic flows from the outsid
 
 ---
 
-## 🛠️ Step 1 — OS Preparation `[ALL]`
+## 🛠️ Step 1 — OS Preparation `[ALL Nodes]`
 *Run these steps on **all 3 nodes** (Master and Workers).*
 
 ### 1.1 🏷️ Local DNS Resolution
 > 🧠 **What this does:** K8s nodes must be able to find each other by name. Since we don't have a local DNS server configured for these static IPs, we hardcode them into the local `/etc/hosts` file.
-
+Set a unique hostname for the machine you are currently on
 ```bash
-# Set a unique hostname for the machine you are currently on
-sudo hostnamectl set-hostname <k8s-master|k8s-node1|k8s-node2>
-
-# Inject the cluster roster into the local hosts file
+sudo hostnamectl set-hostname k8s-master
+```
+```
+sudo hostnamectl set-hostname k8s-node1
+```
+```
+sudo hostnamectl set-hostname k8s-node2
+```
+Inject the cluster roster into the local hosts file
+```
 sudo tee /etc/hosts <<'EOF'
 127.0.0.1   localhost localhost.localdomain localhost4 localhost4.localdomain4
 ::1         localhost localhost.localdomain localhost6 localhost6.localdomain6
