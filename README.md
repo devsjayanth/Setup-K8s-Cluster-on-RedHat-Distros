@@ -86,7 +86,7 @@ sudo dnf install -y \
   setroubleshoot-server audit chrony yum-utils
 ```
 
-### 1.4 ⚠️ REBOOT
+### 1.4 ⚠️ Reboot
 > 🧠 **What this does:** Aligns your running kernel with the newly installed `kernel-modules-extra`. If you skip this, `modprobe br_netfilter` will fail, and Calico will never start.
 
 ```bash
